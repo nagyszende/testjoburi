@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Map with Google Sheets Data and Shapefile</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <!-- Leaflet Shapefile Plugin -->
+    <script src="https://unpkg.com/leaflet.shapefile/leaflet.shapefile.js"></script>
+
+    <style>
+        /* Reset CSS to avoid any discrepancies between browsers */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Style for the map container */
+        #map { 
+            height: 600px; 
+            width: 100%;
+            background-color: rgb(46, 93, 169); /* Blue background for the map */
+        }
+
+        /* Apply blue color to the body */
+        body {
+            background-color: rgb(46, 93, 169);
+            font-family: Arial, sans-serif;
+            color: white;
+            margin: 0;
+            padding: 0;
+        }
+
+        h2 {
+            text-align: center;
+            color: white;
+            padding-top: 20px;
+        }
+
+        /* Container for the filter dropdowns */
+        .filter-container {
+            margin: 20px;
+            text-align: center;
+        }
+
+        /* Style for the select dropdowns */
+        select {
+            padding: 10px;
+            font-size: 16px;
+            background-color: #fff;
+            color: #333;
+            border-radius: 5px;
+            width: 200px;
+            margin-top: 10px;
+        }
+
+        /* Ensuring the dropdowns are visible */
+        select, label {
+            display: inline-block;
+            vertical-align: middle;
+        }
+
+        label {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<h2>Harta Joburi Test</h2>
+
+<!-- Filter for selecting a state -->
+<div class="filter-container">
+    <label for="stateFilter">Choose a state: </label>
+    <select id="stateFilter">
+        <option value="">--Select a State--</option>
+    </select>
+</div>
+
+<!-- Filter for selecting a position -->
+<div class="filter-container">
+    <label for="positionFilter">Choose a position: </label>
+    <select id="positionFilter">
+        <option value="">--Select a Position--</option>
+    </select>
+</div>
+
+<div id="map"></div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Initialize Leaflet Map
+        var map = L.map('map').setView([37.8, -96], 4); // Center the map on the United States
+
+        // Create a LayerGroup for state boundaries
+        var statesLayer = new L.LayerGroup().addTo(map);
+        var statesData = []; // Store state data for filtering
+        var positionData = {}; // Store markers data by position
+
+        // Define style for the states (light red fill and white border)
+        function style(feature) {
+            return {
+                fillColor: 'rgb(226, 22, 27)', // Red
+                weight: 2,
+                opacity: 1,
+                color: 'white', // White border
+                dashArray: '3',
+                fillOpacity: 1 // No transparency for the red fill
+            };
+        }
+
+        // Add a shapefile (GeoJSON) of US states
+        fetch('simplificat.geojson')
+            .then(response => response.json())
+            .then(geojsonData => {
+                // Add the GeoJSON data as a layer with styling
+                L.geoJSON(geojsonData, {
+                    style: style,
+                    onEachFeature: function(feature, layer) {
+                        // Store each state feature for future filtering
+                        statesData.push({
+                            name: feature.properties.NAME,
+                            bounds: layer.getBounds()
+                        });
+
+                        // Add state names to the filter dropdown
+                        var stateFilter = document.getElementById('stateFilter');
+                        var option = document.createElement('option');
+                        option.value = feature.properties.NAME; // Assuming the "NAME" property holds the state name
+                        option.text = feature.properties.NAME;
+                        stateFilter.appendChild(option);
+
+                        // Bind a popup (optional)
+                        layer.on('click', function() {
+                            map.fitBounds(layer.getBounds()); // Zoom to the clicked state
+                        });
+                    }
+                }).addTo(statesLayer);
+            })
+            .catch(error => console.error('Error loading shapefile:', error));
+
+        // Google Sheet URL via gsx2json
+        var sheetUrl = 'https://gsx2json.com/api?id=1NipPEXqACIrXn35wvBzZfj-yXjaQ-KWGenWS9-X6Gkg&sheet=Sheet1';  
+
+        // Fetch the data from Google Sheets via the gsx2json API
+        fetch(sheetUrl)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Data fetched from Google Sheets:', data); // Debug: See what the data looks like
+                
+                if (!data || !data.rows) {
+                    console.error('No rows found in data:', data);
+                    return; // Stop script if no rows are found
+                }
+
+                var rows = data.rows;
+
+                // Function to set popup content
+                function getPopupContent(row) {
+                    return `
+                        <b>City:</b> ${row['City'] || 'N/A'}<br>
+                        <b>State:</b> ${row['State'] || 'N/A'}<br>
+                        <b>Employer:</b> ${row['Employer'] || 'N/A'}<br>
+                        <b>Positions:</b> ${row['Positions'] || 'N/A'}<br>
+                        <b>Other Info:</b> ${row['Other Info'] || 'N/A'}<br>
+                        <b>Link:</b> <a href="${row['Link']}" target="_blank">${row['Link'] || 'N/A'}</a>
+                    `;
+                }
+
+                // Function to add markers for rows and store by position
+                function addMarkers() {
+                    rows.forEach(function(row, index) {
+                        var lat = parseFloat(row['Latitude']);
+                        var lng = parseFloat(row['Longitude']);
+                        var position = row['Positions'];
+
+                        // Store markers by position
+                        if (!positionData[position]) {
+                            positionData[position] = [];
+                        }
+
+                        // Check if latitude and longitude are valid
+                        if (!isNaN(lat) && !isNaN(lng)) {
+                            var marker = L.circleMarker([lat, lng], {
+                                radius: 6, // Marker size
+                                fillColor: 'white',
+                                color: 'white',
+                                weight: 2,
+                                opacity: 1,
+                                fillOpacity: 1
+                            });
+
+                            // Bind the popup to the marker
+                            marker.bindPopup(getPopupContent(row));
+
+                            // Store the marker by position
+                            positionData[position].push(marker);
+                        } else {
+                            console.warn(`Invalid coordinates for row ${index + 1}:`, row);
+                        }
+                    });
+                }
+
+                // Function to filter markers by position
+                function filterByPosition(position) {
+                    // Remove all markers from the map
+                    Object.values(positionData).forEach(markers => {
+                        markers.forEach(marker => marker.remove());
+                    });
+
+                    // If position is selected, show the corresponding markers
+                    if (position) {
+                        positionData[position].forEach(marker => marker.addTo(map));
+                    } else {
+                        // Show all markers if no position is selected
+                        Object.values(positionData).forEach(markers => {
+                            markers.forEach(marker => marker.addTo(map));
+                        });
+                    }
+                }
+
+                // Initially add all markers
+                addMarkers();
+
+                // Position filter functionality
+                var positionFilter = document.getElementById('positionFilter');
+                positionFilter.addEventListener('change', function() {
+                    var selectedPosition = positionFilter.value;
+                    filterByPosition(selectedPosition);
+                });
+
+                // Get unique positions from the data and populate the position filter
+                var uniquePositions = [...new Set(rows.map(row => row['Positions']))];
+                uniquePositions.forEach(function(position) {
+                    var positionFilter = document.getElementById('positionFilter');
+                    var option = document.createElement('option');
+                    option.value = position;
+                    option.text = position;
+                    positionFilter.appendChild(option);
+                });
+
+            })
+            .catch(error => console.error('Error fetching data:', error));
+
+        // State filter functionality
+        var stateFilter = document.getElementById('stateFilter');
+        stateFilter.addEventListener('change', function() {
+            var selectedState = stateFilter.value;
+
+            if (selectedState) {
+                // Find the selected state in the data
+                var state = statesData.find(function(s) {
+                    return s.name === selectedState;
+                });
+
+                if (state) {
+                    // Zoom to the selected state's bounds
+                    map.fitBounds(state.bounds);
+                }
+            }
+        });
+    });
+</script>
+
+</body>
+</html>
